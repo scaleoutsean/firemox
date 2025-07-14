@@ -6,6 +6,7 @@
     - [Traget audience](#traget-audience)
   - [Features](#features)
   - [How to use](#how-to-use)
+    - [Configuration](#configuration)
     - [Storage on-boarding](#storage-on-boarding)
     - [Storage off-boarding](#storage-off-boarding)
   - [Firemox main menu](#firemox-main-menu)
@@ -75,6 +76,16 @@ That way we end up with a SolidFire volume and PVE iSCSI pool both named `dc1-dr
 ![Firemox objective - naming consistency in storage resources](./images/firemox-naming-consistency-of-storage-resources.png)
 
 When SolidFire volumes are created it is possible to override that initial PVE + SF pattern, but I haven't tested it much because I'm opinionated about this. If automation is successful, volume names shouldn't matter.
+
+### Configuration
+
+See the top of firemox.ps1:
+
+- SolidFire API endpoint and credentials for a cluster admin with sufficient permissions to (at least) volumes
+- PVE cluster admin with sufficient permissions for storage-related operations
+- SolidFire Storage Tenant Account ID (you can create it beforehand in SolidFire UI and hard-code the ID (integer) in the script to avoid having to enter it every time)
+
+It is possible to leave both SolidFire and PVE passwords empty and provide them at startup.
 
 ### Storage on-boarding
 
