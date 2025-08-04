@@ -210,7 +210,7 @@ I'm not sure they work as they do with other virtualization platforms, but I hav
 
 I tried a simple workflow (CT on VG/iSCSI Pool; take a snapshot, followed by a restore) and it worked. Some "freeze" scripts would probably be helpful, but with more than one VM/CT per VG this could get complicated as several (dozens?) would have to be successfully frozen before a storage snapshot of the VG beneath them could be taken. 
 
-`LVM` (which Firemox uses on top of iSCSI pools) doesn't support snapshots (take a look at [this](https://pve.proxmox.com/pve-docs/chapter-pvesm.html#_storage_types) table with storage types and features).
+`LVM` (which Firemox uses on top of iSCSI pools) doesn't support snapshots (take a look at [this](https://pve.proxmox.com/pve-docs/chapter-pvesm.html#_storage_types) table with storage types and features). But []PVE version 9 has added that](https://forum.proxmox.com/threads/proxmox-ve-9-0-beta-released.168618/#post-784298) feature.
 
 For KVM VMs, consider enabling Guest Agent for enhanced consistency with a combination of freeze scripts. See [here](https://pve.proxmox.com/wiki/Qemu-guest-agent) for related information. You could schedule VM freeze 10 seconds before SolidFire snapshots are scheduled to fire, and unfreeze right after SolidFire snapshots happen, or you could create a script that does this on demand. 
 
