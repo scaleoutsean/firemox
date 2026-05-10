@@ -161,9 +161,13 @@ As mentioned elsewhere, I don't recommend the use of Volume Access Groups but if
 
 There's nothing special here - list, create, edit and delete.
 
-If you copy VMs and CTs between VGs (on different PVE iSCSI storage pools, obviously) you may want to set Burst IOPS to a higher value (50,000, for example) before copying and set it back after.
+If you copy VMs and CTs between VGs (on different PVE iSCSI storage pools, obviously) you may want to set Burst IOPS to a higher value (50,000, for example) before copying and set it back after. You could have a SolidFire storage class for that and retype a volume to and from before and after special actions. Example:
 
-Remember that some VM/CT QoS settings may be available on the PVE side. Consider both sides when right-sizing your SolidFire QoS policies. As a rule of thumb, Min IOPS on a SolidFire volume should be equal to minimum commitments set on VMs/CTs on that volume.
+- Regular (1K, 2K, 10K)
+- Premium (5K, 10K, 50K)
+- **MigrationBackup** (1K,15K,100K)
+
+Remember that some VM/CT QoS settings may be available on the PVE side. Consider both sides when right-sizing your SolidFire QoS policies. As a rule of thumb, Min IOPS on a SolidFire volume should be equal to the sum of minimum commitments set on VMs/CTs on that volume.
 
 #### Prepare SolidFire for first-time use
 
@@ -210,7 +214,7 @@ I'm not sure they work as they do with other virtualization platforms, but I hav
 
 I tried a simple workflow (CT on VG/iSCSI Pool; take a snapshot, followed by a restore) and it worked. Some "freeze" scripts would probably be helpful, but with more than one VM/CT per VG this could get complicated as several (dozens?) would have to be successfully frozen before a storage snapshot of the VG beneath them could be taken. 
 
-`LVM` (which Firemox uses on top of iSCSI pools) doesn't support snapshots (take a look at [this](https://pve.proxmox.com/pve-docs/chapter-pvesm.html#_storage_types) table with storage types and features). But []PVE version 9 has added that](https://forum.proxmox.com/threads/proxmox-ve-9-0-beta-released.168618/#post-784298) feature.
+`LVM` (which Firemox uses on top of iSCSI pools) doesn't support snapshots (take a look at [this](https://pve.proxmox.com/pve-docs/chapter-pvesm.html#_storage_types) table with storage types and features). But [PVE version 9 has added that](https://forum.proxmox.com/threads/proxmox-ve-9-0-beta-released.168618/#post-784298) feature.
 
 For KVM VMs, consider enabling Guest Agent for enhanced consistency with a combination of freeze scripts. See [here](https://pve.proxmox.com/wiki/Qemu-guest-agent) for related information. You could schedule VM freeze 10 seconds before SolidFire snapshots are scheduled to fire, and unfreeze right after SolidFire snapshots happen, or you could create a script that does this on demand. 
 
@@ -222,7 +226,7 @@ Firemox uses `iSCSI/kernel` "driver" and assumes a single PVE storage back-end (
 
 ## FAQs
 
-Firemox doesn't try to do PVE's job, so for any problems or questions please check in the Proxmox community. 
+Firemox *by design* doesn't try to do PVE's job, so for any problems or questions please check in the Proxmox community. 
 
 Some strictly SolidFire-specific details are below and more may be added.
 
@@ -312,7 +316,7 @@ As you can see in Firemox (`Utilities` > `Get SolidFire cluster's iSCSI targets 
 
 `/dev/disk/by-id/wwn-0x6f47acc100000000<hex-clusterId><hex-vol-id-left-padded-to-8bytes>`
 
-Multi-pathing is not recommended (or "supproted") by Firemox. LACP-only redundancy is assumed, and recommended.
+Multi-pathing is not recommended (or "supported") by Firemox. LACP-only redundancy is assumed, and recommended.
 
 ### Backup
 
