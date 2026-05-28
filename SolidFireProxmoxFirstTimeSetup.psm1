@@ -19,12 +19,15 @@ function New-SolidFireStorageAccount {
     }
     elseif ($proceedChoice -eq 'Create new') {
         $sfAccountName = Read-Host "Enter SolidFire tenant account name (recommended: use Proxmox datacenter name)"
-        $sfAccountPassPlain = Read-Host "Enter SolidFire account and iSCSI CHAP password (12-16 characters)"
-        Write-SpectreHost -Message "CHAP password length: $($sfAccountPassPlain.Length)"
-        $chapLength = if ([string]::IsNullOrEmpty($sfAccountPassPlain)) { 0 } else { $sfAccountPassPlain.Length }
-        if ($chapLength -lt 12 -or $chapLength -gt 16) {
-            Write-SpectreHost -Message "[Red]Failed to create SolidFire storage account: chapSecret must be between 12 and 16 characters in length[/]"
-            return
+        while ($true) {
+            $sfAccountPassPlain = Read-Host "Enter SolidFire iSCSI CHAP password (12-16 characters) for the account"
+            Write-SpectreHost -Message "CHAP password length: $($sfAccountPassPlain.Length)"
+            $chapLength = if ([string]::IsNullOrEmpty($sfAccountPassPlain)) { 0 } else { $sfAccountPassPlain.Length }
+            if ($chapLength -ge 12 -and $chapLength -le 16) {
+                break
+            }
+
+            Write-SpectreHost -Message "[Red]Invalid CHAP password length. Please enter between 12 and 16 characters.[/]"
         }
     }
     $body = @{
@@ -97,8 +100,8 @@ function Get-SolidFireTenant {
 }
 
 function Set-ProxmoxIscsiClient {
-    Write-SpectreHost -Message "[Yellow]The way this function works is: (1) you must know your SolidFire tenant account name or ID and you must have just one active volume not yet used by Proxmox VE, and (2) your PVE nodes' iSCSI service must not be in use.[/]"
-    Write-SpectreHost -Message "[Red]This command provides copy-paste commands to run on all PVE nodes, but they will break your existing iSCSI configuration if it's not exactly the same as the new one.[/]"
+    Write-SpectreHost -Message "[Yellow]This tool first uses the Proxmox API iSCSI scan endpoint to validate discovery on a selected node.[/]"
+    Write-SpectreHost -Message "[Yellow]If scan does not find the expected target, you can optionally fall back to legacy manual iscsid/iscsiadm commands.[/]"
     $accounts = Get-SolidFireTenant -Silent
     $account = $accounts | Where-Object { $_.accountID -eq $global:sfAccountId } | Select-Object -First 1
 
@@ -175,6 +178,74 @@ function Set-ProxmoxIscsiClient {
         return
     }
 
+    if (-not $global:pveTicketLast -or -not $global:pveTicketLast.data.ticket) {
+        $null = Connect-ProxmoxVE
+    }
+    if (-not $global:pveTicketLast -or -not $global:pveTicketLast.data.ticket) {
+        Write-SpectreHost -Message "[Red]Failed to obtain Proxmox VE API ticket. Please verify PVE API settings and credentials.[/]"
+        Read-SpectrePause -Message "Press [green]ANY[/] key to return to QoS Policies menu." -AnyKey
+        return
+    }
+
+    $nodesResponse = Invoke-ProxmoxRestMethod -Uri "$global:pveBaseUrl/api2/json/cluster/config/nodes" -Headers $global:pveHeaders -Method Get
+    $nodeChoices = @()
+    if ($nodesResponse -and $nodesResponse.data) {
+        $nodeChoices = $nodesResponse.data |
+            ForEach-Object { if ($_.name) { $_.name } elseif ($_.node) { $_.node } } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    }
+    if (-not $nodeChoices -or $nodeChoices.Count -eq 0) {
+        Write-SpectreHost -Message "[Red]No Proxmox nodes found via API. Cannot run iSCSI scan test.[/]"
+        Read-SpectrePause -Message "Press [green]ANY[/] key to return to QoS Policies menu." -AnyKey
+        return
+    }
+
+    $selectedNode = Read-SpectreSelection -Title "Select a Proxmox node to test iSCSI scan" -Choices $nodeChoices -PageSize 10
+    if (-not $selectedNode) {
+        Write-SpectreHost -Message "[Yellow]No node selected. Returning to menu.[/]"
+        Read-SpectrePause -Message "Press [green]ANY[/] key to return to QoS Policies menu." -AnyKey
+        return
+    }
+
+    $scanUri = "$global:pveBaseUrl/api2/json/nodes/$selectedNode/scan/iscsi?portal=$([uri]::EscapeDataString($svip))"
+    Write-SpectreHost -Message "[Cyan]Testing Proxmox iSCSI scan on node '$selectedNode' for portal '$svip'...[/]"
+    $scanData = @()
+    try {
+        $scanResponse = Invoke-ProxmoxRestMethod -Uri $scanUri -Headers $global:pveHeaders -Method Get
+        if ($scanResponse -and $scanResponse.data) {
+            $scanData = @($scanResponse.data)
+        }
+    }
+    catch {
+        Write-SpectreHost -Message "[Red]PVE iSCSI scan API call failed on node '$selectedNode': $($_.Exception.Message)[/]"
+    }
+
+    $foundTarget = $false
+    foreach ($entry in $scanData) {
+        $entryJson = $entry | ConvertTo-Json -Compress
+        if ($entryJson -match [regex]::Escape($iqn)) {
+            $foundTarget = $true
+            break
+        }
+    }
+
+    if ($foundTarget) {
+        Write-SpectreHost -Message "[Green]Success: Proxmox scan discovered the SolidFire target IQN for this account.[/]"
+        Write-SpectreHost -Message "[Green]You can continue with iSCSI storage pool creation without running initial manual iscsiadm discovery/portal registration.[/]"
+        Write-SpectreHost -Message "[Cyan]If needed, equivalent CLI test on node '$selectedNode': pvesh get /nodes/$selectedNode/scan/iscsi --portal $svip[/]"
+        Read-SpectrePause -Message "Press [green]ANY[/] key to return to QoS Policies menu." -AnyKey
+        return
+    }
+
+    Write-SpectreHost -Message "[Yellow]Scan completed but did not find expected target IQN '$iqn' on node '$selectedNode'.[/]"
+    Write-SpectreHost -Message "[Yellow]This often means CHAP/discovery settings are missing on that node. You can now choose a legacy fallback.[/]"
+    $useLegacyFallback = Read-SpectreConfirm -Message "Generate legacy manual iSCSI client commands for fallback?" -TimeoutSeconds 10 -DefaultAnswer 'n'
+    if (-not $useLegacyFallback) {
+        Read-SpectrePause -Message "Press [green]ANY[/] key to return to QoS Policies menu." -AnyKey
+        return
+    }
+
     $commands = @()
     $commands += "cp /etc/iscsi/iscsid.conf /etc/iscsi/iscsid.conf.original-$(Get-Date -Format 'yyyyMMddHHmmss')"
     $commands += "sed -i 's/^node.startup = .*/node.startup = automatic/' /etc/iscsi/iscsid.conf"
@@ -189,7 +260,7 @@ function Set-ProxmoxIscsiClient {
     $commands += "systemctl restart iscsid"
     $commands += "systemctl status iscsid"
     $commands += "systemctl is-enabled iscsid"
-    Write-SpectreHost -Message "[Cyan]Run the following commands on your Proxmox node(s):[/]"
+    Write-SpectreHost -Message "[Cyan]Run the following legacy fallback commands on your Proxmox node(s):[/]"
     Write-SpectreHost -Message ($commands -join "`n")
     Write-SpectreHost -Message "[Cyan]Connect to a Proxmox node using SSH in another terminal (or tab) and run the commands above.[/]"
     Write-SpectreHost -Message "[Cyan]If you see no errors, you should be able to enable iscsid and if everything works fine, repeat that on other PVE nodes:[/]"

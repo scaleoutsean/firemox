@@ -134,6 +134,7 @@ function New-SolidFireVolume {
         }
         $volumeSizeGiB = [int]$volumeSizeGiB
         $totalSize = [int64]($volumeSizeGiB * 1024 * 1024 * 1024)
+        $pveClusterName = if ($global:pveApiUri -and $global:pveApiUri.Host) { $global:pveApiUri.Host } else { 'firemox' }
         Write-SpectreHost -Message "Creating SolidFire volume: [green]name: ${name}[/], [green]size: ${volumeSizeGiB} GiB[/], [green]QoS policy ID: ${qosPolicyId}[/]"
 
         if (($qosPolicyId -eq 0) -or ($null -eq $qosPolicyId)) {

@@ -1,6 +1,17 @@
 #!/usr/bin/env pwsh
 # -*- coding: utf-8 -*-
 
+param(
+    [switch]$SkipCertificateCheck,
+    [string]$SfMvip,
+    [string]$SfUser,
+    [string]$SfPassword,
+    [string]$SfVolumePrefix,
+    [string]$PveApiUrl,
+    [string]$PveApiTokenId,
+    [string]$PveApiTokenSecret
+)
+
 
 # Firemox is used to configure SolidFire for use with Proxmox VE.
 # It sets up the SolidFire account, volumes, initiators, VAG and QoS policies.
@@ -14,21 +25,73 @@
 [Uri]$Global:sfApiUri = [Uri]'https://192.168.1.34/json-rpc/12.5/' # SolidFire API address as Uri type
 [string]$Global:sfAdmin = 'admin'       # SolidFire account name used for Proxmox VE datacenter configuration
 [string]$Global:sfPass = 'admin'
-[int]$Global:sfAccountId = $null        # SolidFire account ID used for Proxmox VE datacenter configuration
+[int]$Global:sfAccountId = 169        # SolidFire account ID (not name!!!) used for Proxmox VE datacenter configuration
 [hashtable]$Global:sfClusterInfo = @{}  # We keep cluster info, uniqueID, etc. here
 [string]$Global:sfClusterName = ''      # Updated from sfClusterInfo after connecting to SolidFire
 [hashtable]$Global:sfHeaders = @{}
 [hashtable]$Global:sfConnection = @{}
 # Proxmox VE datacenter API parameters
-[Uri]$Global:pveApiUri = [Uri]'https://192.168.1.194:8006'
+[Uri]$Global:pveApiUri = [Uri]'https://192.168.1.176:8006'
 [string]$Global:pveBaseUrl = $Global:pveApiUri.AbsoluteUri.TrimEnd('/') # Base URL for Proxmox VE API
 $Global:pveHeaders = @{}
 [string]$Global:pveAdmin = 'root@pam'   # Proxmox VE user with sufficient privileges to create storage pools and volumes and view certain datacenter objects
-[string]$Global:pvePass = 'NetApp123$'           # Proxmox VE user's password
+[string]$Global:pvePass = '123123123'           # Proxmox VE user's password
+[string]$Global:pveTokenId = ''
+[string]$Global:pveTokenSecret = ''
 $Global:pveTicketLast = @{}
 [string]$Global:sfVolumePrefix = 'dc1-' # Prefix for SolidFire volumes created for Proxmox VE datacenter, also for the optional VAG name. We add $sfClustername and "-<vol_id>" to create volume names.
+[bool]$Global:skipCertificateCheck = $false
 
-$essentials = @('sfApiUri', 'sfAdmin', 'sfPass', 'pveApiUri', 'pveAdmin', 'pvePass')
+if ($PSBoundParameters.ContainsKey('SkipCertificateCheck') -and $SkipCertificateCheck) {
+    $Global:skipCertificateCheck = $true
+    if (-not $Global:PSDefaultParameterValues) {
+        $Global:PSDefaultParameterValues = @{}
+    }
+    $Global:PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+    $Global:PSDefaultParameterValues['Invoke-WebRequest:SkipCertificateCheck'] = $true
+}
+
+if (-not [string]::IsNullOrWhiteSpace($SfMvip)) {
+    $sfEndpoint = $SfMvip.Trim()
+    if ($sfEndpoint -notmatch '^https?://') {
+        $sfEndpoint = "https://$sfEndpoint"
+    }
+    if ($sfEndpoint -notmatch '/json-rpc/') {
+        $sfEndpoint = ($sfEndpoint.TrimEnd('/')) + '/json-rpc/12.5/'
+    }
+    elseif ($sfEndpoint -notmatch '/$') {
+        $sfEndpoint += '/'
+    }
+    $Global:sfApiUri = [Uri]$sfEndpoint
+}
+if (-not [string]::IsNullOrWhiteSpace($SfUser)) {
+    $Global:sfAdmin = $SfUser
+}
+if (-not [string]::IsNullOrWhiteSpace($SfPassword)) {
+    $Global:sfPass = $SfPassword
+}
+
+if (-not [string]::IsNullOrWhiteSpace($PveApiUrl)) {
+    $Global:pveApiUri = [Uri]$PveApiUrl
+    $Global:pveBaseUrl = $Global:pveApiUri.AbsoluteUri.TrimEnd('/')
+}
+if (-not [string]::IsNullOrWhiteSpace($PveApiTokenId)) {
+    $Global:pveTokenId = $PveApiTokenId
+}
+if (-not [string]::IsNullOrWhiteSpace($PveApiTokenSecret)) {
+    $Global:pveTokenSecret = $PveApiTokenSecret
+}
+if (-not [string]::IsNullOrWhiteSpace($SfVolumePrefix)) {
+    $Global:sfVolumePrefix = $SfVolumePrefix.Trim()
+}
+else {
+    $envSfVolumePrefix = [Environment]::GetEnvironmentVariable('SF_VOLUME_PREFIX')
+    if (-not [string]::IsNullOrWhiteSpace($envSfVolumePrefix)) {
+        $Global:sfVolumePrefix = $envSfVolumePrefix.Trim()
+    }
+}
+
+$essentials = @('sfApiUri', 'sfAdmin', 'sfPass', 'pveApiUri')
 foreach ($essential in $essentials) {
     $varValue = Get-Variable -Name $essential -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     $envValue = [Environment]::GetEnvironmentVariable($essential)
@@ -36,7 +99,7 @@ foreach ($essential in $essentials) {
         Write-Host "Essential variable `$Global:$essential is not set. It should be loaded from environment variables or set in the script." -ForegroundColor Yellow
     }
 }
-$mustHave = @('sfPass', 'pvePass')
+$mustHave = @('sfPass')
 foreach ($thing in $mustHave) {
     $varValue = Get-Variable -Name $thing -Scope Global -ValueOnly -ErrorAction SilentlyContinue
     $envValue = [Environment]::GetEnvironmentVariable($thing)
@@ -53,6 +116,34 @@ foreach ($thing in $mustHave) {
         }
         Set-Variable -Name $thing -Value $value -Scope Global
     }
+}
+
+$hasPveToken = -not [string]::IsNullOrWhiteSpace($Global:pveTokenId) -and -not [string]::IsNullOrWhiteSpace($Global:pveTokenSecret)
+if (-not $hasPveToken -and -not $Global:pveAdmin) {
+    Write-Host "Must-have variable `$Global:pveAdmin is not set." -ForegroundColor Red
+    $Global:pveAdmin = Read-Host "Please enter value for `$Global:pveAdmin"
+}
+if (-not $hasPveToken -and -not $Global:pvePass) {
+    Write-Host "Must-have variable `$Global:pvePass is not set." -ForegroundColor Red
+    $value = Read-Host -AsSecureString "Please enter value for `$Global:pvePass (input hidden)"
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($value)
+    $plainValue = [Runtime.InteropServices.Marshal]::PtrToStringUni($bstr)
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    $value = $plainValue
+    if (-not $value) {
+        Write-Host "Exiting script due to missing value without which the script cannot work." -ForegroundColor Red
+        exit 1
+    }
+    $Global:pvePass = $value
+}
+
+if ($hasPveToken) {
+    Write-Host "Using Proxmox API token authentication." -ForegroundColor Cyan
+    if (-not $Global:PSDefaultParameterValues) {
+        $Global:PSDefaultParameterValues = @{}
+    }
+    $Global:PSDefaultParameterValues['Invoke-RestMethod:SkipHeaderValidation'] = $true
+    $Global:PSDefaultParameterValues['Invoke-WebRequest:SkipHeaderValidation'] = $true
 }
 
 $modules = @('PwshSpectreConsole')
@@ -154,6 +245,7 @@ do {
                     "6. [Purple_2]Remove[/] empty (void of VG/LVM configuration) [orange3]PVE[/] iSCSI pool to release volume to SolidFire :red_exclamation_mark:",
                     "7. [Blue]View[/] PVE and SolidFire storage network details :double_curly_loop:",
                     "8. [Blue]View[/] [Red]SolidFire[/] iSCSI targets exposed to PVE :eyes:",
+                    "9. [Blue]Run[/] Proxmox iSCSI scan (node + SolidFire SVIP) :satellite:",
                     "B. Back to [Blue]main menu[/] :house:"
                 )
                 $sub = Read-SpectreSelection -Title "Pick a [Blue]tool[/]" -Choices $volumeChoices -Color Turquoise2 -PageSize 10 -EnableSearch
@@ -167,6 +259,7 @@ do {
                     '6' { Remove-ProxmoxIscsiPool; break }
                     '7' { Get-SolidFirePveNetworkSetting; break }
                     '8' { Get-SFClusterIscsiTarget -sfAccountId $sfAccountId; break }
+                    '9' { Test-ProxmoxIscsiScan; break }
                     'B' { break }
                     default { Write-Host 'Invalid option'; break }
                 }
@@ -267,7 +360,7 @@ do {
                 Write-SpectreRule -Title "First-time setup :gear: | $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")" -Alignment Center -Color Yellow
                 $volumeChoices = @(
                     "1. [Green]Create[/] [red]SolidFire[/] storage tenant account for [orange3]PVE[/] :bust_in_silhouette:",
-                    "2. [Green]Configure[/] iSCSI client on new [orange3]PVE[/] node :wrench:",
+                    "2. [Green]Test[/] Proxmox iSCSI scan on new [orange3]PVE[/] node (legacy fallback available) :wrench:",
                     "B. Back to [Blue]main menu[/] :house:"
                 )
                 $sub = Read-SpectreSelection -Title "Pick a [blue]tool[/]" -Choices $volumeChoices -Color Turquoise2 -PageSize 10 -EnableSearch

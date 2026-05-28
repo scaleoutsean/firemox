@@ -4,6 +4,7 @@
 - [Firemox - an opinionated Proxmox-SolidFire console in PowerShell](#firemox---an-opinionated-proxmox-solidfire-console-in-powershell)
   - [About Firemox](#about-firemox)
     - [Traget audience](#traget-audience)
+  - [TL;DR](#tldr)
   - [Features](#features)
   - [How to use](#how-to-use)
     - [Configuration](#configuration)
@@ -50,6 +51,54 @@ Firemox isn't meant for outright production use: I haven't seen it delete random
 
 Experienced SolidFire administrators with basic PowerShell skills (likely required to fix or improve the code) may find it to be a good starting point and make use of it in their VI environment.
 
+## TL;DR
+
+- Make sure all your PVE nodes can connect to SolidFire SVIP and use iSCSI 
+- Set the SolidFire volume prefix with `-SfVolumePrefix` or `SF_VOLUME_PREFIX` if you want something other than the default `dc1-`
+```powershell
+./firemox.ps1 -SkipCertificateCheck `
+  -SfMvip 192.168.1.34 -SfUser 'admin' -SfPassword 'solidfire-secret' `
+  -SfVolumePrefix 'dc1-' `
+  -PveApiUrl https://YOUR-PVE:8006 -PveApiTokenId 'user@realm!tokenname' -PveApiTokenSecret 'token-secret'
+# Example with fake credentials
+# ./firemox.ps1 -SkipCertificateCheck -SfMvip 192.168.1.34 -SfUser 'admin' -SfPassword 'admin' -SfVolumePrefix 'dc2-' -PveApiUrl https://s176:8006 -PveApiTokenId 'root@pam!wtf' -PveApiTokenSecret 'f23ed945-e576-4474-8429-12be71279d9a'
+```
+
+What's what:
+
+- SkipCertificateCheck - not recommended, of course. Best [upload](https://scaleoutsean.github.io/2020/11/24/scary-bs-postman-ssl-certs.html) a valid certificate, even if it's self-signed, and add the CA cert to OS trust store
+- SfMvip - SolidFire MVIP or API URL. If you pass just host/IP, Firemox builds `https://<mvip>/json-rpc/12.5/`
+- SfUser - SolidFire cluster admin account name
+- SfPassword - SolidFire cluster admin password
+- SfVolumePrefix - optional SolidFire volume/VAG prefix. Defaults to `dc1-` when omitted
+- PveApiUrl - the usual, https://PVE_NODE:8006
+- PveApiTokenId - this isn't the account name, but the API token. You can use one with restricted permissions as common for storage plugins
+- PveApiTokenSecret - token itself, "secret"
+
+To use Firemox, start with `SolidFire volumes` to create them, and go to `Proxmox-SolidFire toolbox` to use them from PVE.
+
+If you're successfully connected to both SolidFire and PVE, go to `SolidFire volumes` and create a volume for PVE.
+
+```sh
+Select a task using ↕ or search                                      
+                                                                     
+  1. Proxmox-SolidFire toolbox 🧰                                    
+> 2. SolidFire volumes 💾   
+```
+
+After that, go to `SolidFire-Proxmox Toolbox` (top level menu) and run items 4 and 3:
+
+```sh
+  1. View all PVE VG/LVM and iSCSI storage pool(s) backed by SolidFire 👀                         
+  2. View end-to-end VG-to-IQN mapping (does not show iSCSI pools w/o VG/LVM) 🗺                  
+  3. Create VG/LVM on existing PVE iSCSI storage pool 🆕                                          
+> 4. Create PVE iSCSI storage pool on SolidFire-based iSCSI volume 🆕                             
+```
+
+That's how you create a shared LVM datastores on SolidFire iSCSI pools. You'd generally want `N` shared LVM datastores for a PVE cluster with `N` nodes.
+
+It's best to setup and play with a test PVE cluster until you're familiar with all steps.
+
 ## Features
 
 - Prepare SolidFire and PVE (create storage account on SolidFire, configure iSCSI clients on PVE nodes)
@@ -64,7 +113,7 @@ The main objective of Firemox is to offer consistency in the naming of SolidFire
 
 How that works:
 
-- Start with a string named after PVE DC, such as `dc1` (this is set manually in Firemox (`sfVolumePrefix`, as some folks may want to use something else)
+- Start with a string named after PVE DC, such as `dc1` (this now comes from the `-SfVolumePrefix` parameter or `SF_VOLUME_PREFIX`, with `dc1-` as the default)
 - Add SolidFire cluster name (lowercased), such as `dr` (this is automatic based on cluster name, so you'd have to change the script to use something else)
 - Use three-digit numbers for volumes, such as `005`, so that the fifth volume created for this PVE becomes `dc1-dr-005`. These are auto-incremented.
 - In PVE, register iSCSI pool using the same string as SolidFire volume (automatic)
@@ -101,6 +150,11 @@ It is like on-boarding but in reverse.
 Clean up VMs and CTs from a VG, remove the VG/LVM, and then un-register iSCSI pool underneath it. Note that unlike in on-boarding which can be done in bulk, off-boarding of PVE storage resources is limited to one storage object at a time (VG or storage pool).
 
 Finally, delete (and purge if you want to release the space ASAP - it's also doable from Firefmox) the SolidFire LUN that iSCSI pool used.
+
+**IMPORTANT:** 
+
+- When LVM is removed, PVE "wipes" (overwrites) all of it, which can take a while. You can't delete the underlying iSCSI pool until PVE completes that task (which you can see in the TUI if you attempt deletion of a volume where LVM delete task is happening). Simply wait and retry in 5 or 15 minutes.
+- Do **NOT** forget to purge volume in `SolidFire Volumes` if you're making significant multi-step changes and seeing deleted volumes bothers you. Purge-on-Delete is not done on purpose to avoid fat-finger incidents, but that means the volume will remain there (with the status "deleted") for several hours. You can purge volumes by going to `SolidFire Volumes` and selecting `Remove (purge) ALL already deleted SolidFire volumes`.
 
 ## Firemox main menu
 
@@ -147,9 +201,11 @@ The utilities folder has scripts that can be used to bulk-add initiators to Soli
 
 #### First-time setup
 
-This does two things: gives you the opportunity to create a new SolidFire storage tenant account, and spits out a sample iSCSI client configuration for PVE nodes.
+This does two things: gives you the opportunity to create a new SolidFire storage tenant account, and tests iSCSI discovery via Proxmox API scan on a selected node. 
 
-iSCSI example configuration offered by Firemox doesn't do anything special. You're free to modify the script or use own configuration as long as it's supported by PVE (Open iSCSI) and SolidFire.
+**WARNING:** avoid copy-pasting commands. These features or "config examples" are not meant to replace proper manual or automated (with [SolidFire Ansible](https://github.com/scaleoutsean/netapp.solidfire) and whatever one should use for Debian/PVE, for example) configuration. 
+
+If scan does not discover the expected IQN, Firemox can still provide the legacy manual iSCSI client configuration commands as a fallback.
 
 As mentioned elsewhere, I don't recommend the use of Volume Access Groups but if you prefer that approach over CHAP, it's also easy. 
 
@@ -174,9 +230,9 @@ Remember that some VM/CT QoS settings may be available on the PVE side. Consider
 This has just two parts:
 
 - Create a storage tenant in SolidFire
-- Configure PVE hosts as iSCSI clients to SolidFire (you need a SolidFire volume to do that)
+- Test PVE node iSCSI discovery to SolidFire (you need a SolidFire volume to validate the target IQN)
 
-Firemox doesn't support multiple iSCSI back-ends to SolidFire, so iSCSI configuration changes PVE hosts to only connect to SolidFire iSCSI as the tenant account your PVE data-center uses.
+If your environment needs explicit CHAP/discovery settings on PVE nodes, use the legacy fallback commands generated by Firemox.
 
 ## Limitations and workarounds
 
@@ -208,15 +264,13 @@ Firemox could provide this PVE endpoint switchover without needing a restart, bu
 
 ### SolidFire snapshots
 
-Firemox doesn't handle them, but you may add volumes to existing SolidFire snapshot schedules to have them protected in a cash-consistent way. You can of course also take snapshots from the SolidFire Web UI on your own.
-
-I'm not sure they work as they do with other virtualization platforms, but I haven't looked into operational workflows. For example, if you take a snapshot of a volume with VM 100 and CT 101, move those to another place, and then restore that snapshot, there are probably different paths from there depending on whether you want to recover that VM and CT or not.
-
-I tried a simple workflow (CT on VG/iSCSI Pool; take a snapshot, followed by a restore) and it worked. Some "freeze" scripts would probably be helpful, but with more than one VM/CT per VG this could get complicated as several (dozens?) would have to be successfully frozen before a storage snapshot of the VG beneath them could be taken. 
-
-`LVM` (which Firemox uses on top of iSCSI pools) doesn't support snapshots (take a look at [this](https://pve.proxmox.com/pve-docs/chapter-pvesm.html#_storage_types) table with storage types and features). But [PVE version 9 has added that](https://forum.proxmox.com/threads/proxmox-ve-9-0-beta-released.168618/#post-784298) feature.
+PVE 9 supports snapshots on shared LVM as [technology preview](https://forum.proxmox.com/threads/proxmox-ve-9-0-beta-released.168618/#post-784298) feature and Firemox enables that by default.
 
 For KVM VMs, consider enabling Guest Agent for enhanced consistency with a combination of freeze scripts. See [here](https://pve.proxmox.com/wiki/Qemu-guest-agent) for related information. You could schedule VM freeze 10 seconds before SolidFire snapshots are scheduled to fire, and unfreeze right after SolidFire snapshots happen, or you could create a script that does this on demand. 
+
+Firemox doesn't handle VM or CT snapshots because that's PVE's job.
+
+Firemox does not handle SolidFire snapshots because PVE's snapshots are much better. If you take SolidFire snapshots, you may as well set up simple [a schedule](https://scaleoutsean.github.io/2024/06/16/snapshot-schedules-in-solidfire.html) - yes, it's going to be crash-consistent, but you don't have to do anything and these should be "just-in-case" anyway. The recommended way is to use PVE snapshots on Shared LVM, and ship them off to a [Proxmox Backup Server](https://scaleoutsean.github.io/2026/05/10/proxmox-backup-server-versity-s3-netapp-eseries.html).
 
 ### iSCSI with different back-ends
 
@@ -320,19 +374,17 @@ Multi-pathing is not recommended (or "supported") by Firemox. LACP-only redundan
 
 ### Backup
 
-Firemox has no integration with Proxmox Backup. 
+Firemox has no integration with Proxmox Backup. As mentioned above, PVE 9 supports PVE snapshots, so it's trivial to snapshot resources and send backups to [PBS](https://scaleoutsean.github.io/2026/05/10/proxmox-backup-server-versity-s3-netapp-eseries.html).
 
-[Pre- and post-backup jobs could make QoS adjustments](https://scaleoutsean.github.io/2020/11/28/powershell-set-sfqosexception.html) to make backups (and restores) faster.
-
-SolidFire volumes used by PVE can be backed up to S3 on their own (very basic backup without catalog - I've blogged about it extensively), which is a separate topic. See my Awesome SolidFire repository for some additional pointers and scripts.
+As a "just in case" approach, SolidFire volumes used by PVE can be backed up to S3 on their own (very basic backup without a catalog. You could run those weekly and send to Object Lock-enabled infrequent access S3 buckets... There isn't much value in it though, now that Proxmox VE native snapshots are enabled. I've blogged about SolidFire's backup-to-S3 and my Awesome SolidFire repository for some additional pointers and scripts, if you're interested.
 
 ### Monitoring
 
-It can be done, but why? About the only "monitoring-related" thing I could think of is PVE tenant's storage efficiency on SolidFire and and I've added that as I was writing this and concluded it makes sense. (By the way, SolidFire efficiency is global so there's no need to "group" similar VMs or CTs to "improve" deduplication.)
+It can be done in Firemox, but why? About the only "monitoring-related" thing I could think of is PVE tenant's storage efficiency on SolidFire and and I've added that as I was writing this and concluded it makes sense. (By the way, SolidFire efficiency is global so there's no need to "group" similar VMs or CTs to "improve" deduplication.)
 
-But Firemox isn't the right place for performance monitoring. There are many better ways to monitor PVE and SolidFire. 
+Firemox isn't the right place for performance monitoring.
 
-For SolidFire you have [SolidFire Exporter](https://github.com/mjavier2k/solidfire-exporter) (a Prometheus exporter for SolidFire) and [SFC](https://github.com/scaleoutsean/sfc/) (my collector for SolidFire which stores data in InfluxDB 3), both of which gather data that can be visualized in Grafana.
+For SolidFire you have [SolidFire Exporter](https://github.com/mjavier2k/solidfire-exporter) (a Prometheus exporter for SolidFire) and [SFC](https://github.com/scaleoutsean/sfc/) (my collector for SolidFire which stores data in InfluxDB 3), both of which gather data that can be visualized in Grafana. SFC extracts and collects volume attributes, so it will collect shared LVM datastore tags.
 
 ### Security
 

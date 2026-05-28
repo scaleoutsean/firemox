@@ -15,7 +15,17 @@ function Connect-SolidFire {
         'Content-Type' = 'application/json'
     }
     try {
-        $response = Invoke-RestMethod -Uri $global:sfApiUri -Method Post -Headers $sfConnection.Headers -Body '{"method":"GetClusterInfo"}'
+        $invokeParams = @{
+            Uri         = $global:sfApiUri
+            Method      = 'Post'
+            Headers     = $sfConnection.Headers
+            Body        = '{"method":"GetClusterInfo"}'
+            ErrorAction = 'Stop'
+        }
+        if ($global:skipCertificateCheck) {
+            $invokeParams.SkipCertificateCheck = $true
+        }
+        $response = Invoke-RestMethod @invokeParams
         $Global:sfClusterInfo = @{}
         $response.result.clusterInfo.PSObject.Properties | ForEach-Object {
             $Global:sfClusterInfo[$_.Name] = $_.Value
@@ -23,8 +33,6 @@ function Connect-SolidFire {
         $global:sfClusterName = $global:sfClusterInfo.name
     }
     catch {
-        Write-Host "Failed to connect to SolidFire cluster at ${global:sfApiUri}."
-        Write-Host ("DEBUG: Exception details: " + ($_ | Out-String))
-        return
+        throw "Failed to connect to SolidFire cluster at ${global:sfApiUri}. Details: $($_.Exception.Message)"
     }
 }

@@ -14,7 +14,21 @@ function Invoke-SolidFireRestMethod {
         params = $Body
     } | ConvertTo-Json -Depth 5
     try {
-        $response = Invoke-RestMethod -Uri $global:sfApiUri -Method Post -Headers $global:sfHeaders -Body $payload -ContentType 'application/json' -ErrorAction Stop -FollowRelLink -PreserveAuthorizationOnRedirect -SkipCertificateCheck -SslProtocol Tls12
+        $invokeParams = @{
+            Uri                             = $global:sfApiUri
+            Method                          = 'Post'
+            Headers                         = $global:sfHeaders
+            Body                            = $payload
+            ContentType                     = 'application/json'
+            ErrorAction                     = 'Stop'
+            FollowRelLink                   = $true
+            PreserveAuthorizationOnRedirect = $true
+            SslProtocol                     = 'Tls12'
+        }
+        if ($global:skipCertificateCheck) {
+            $invokeParams.SkipCertificateCheck = $true
+        }
+        $response = Invoke-RestMethod @invokeParams
         return $response
     }
     catch {
