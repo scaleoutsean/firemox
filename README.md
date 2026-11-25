@@ -6,6 +6,7 @@
     - [Traget audience](#traget-audience)
   - [TL;DR](#tldr)
   - [Features](#features)
+  - [Experimental PVE LUN provisioning (Perl Plugin)](#experimental-pve-lun-provisioning-perl-plugin)
   - [How to use](#how-to-use)
     - [Configuration](#configuration)
     - [Storage on-boarding](#storage-on-boarding)
@@ -106,6 +107,21 @@ It's best to setup and play with a test PVE cluster until you're familiar with a
 - Register SolidFire volumes as PVE iSCSI storage pools and create VG/LVM on top of such iSCSI storage pools
 - Remove empty VG/LVM/iSCSI storage from PVE (and optionally delete the SolidFire volume behind it)
 - Small quality-of-life stuff like an end-to-end storage map, iSCSI network configuration view, account storage efficiency, etc.
+
+## Experimental PVE LUN provisioning (Perl Plugin)
+
+The [SolidFire storage plugin prototype](./solidfire-proxmox/SolidFirePlugin.pm) can create one SolidFire LUN when adding a storage in the PVE 9.3 generated custom-plugin dialog. This is a lab-only provisioning experiment, not a working shared-LVM datastore or a replacement for Firemox.
+It declares storage API 17 on PVE 9.3 and caps the declared version to the API provided by older PVE releases; the provisioning workflow has been tested on PVE 9.3 only.
+
+Install the plugin on the PVE node and reload the PVE services. In Datacenter > Storage > Add > solidfire, enter the SolidFire API URL, administrator username and password, tenant account ID, and **Provision LUN Size (GiB)**. Set **Content** to **None**. The storage ID becomes the SolidFire volume name. QoS policy is optional (defaults to SolidFire defaults).
+
+The plugin only creates the array volume. Discover and log in to its iSCSI target separately, then configure a PVE iSCSI storage and shared LVM if needed. LUN growth, snapshots, automatic target login, and LVM creation are not implemented for this provisioning workflow. The storage entry is a placeholder, not a VM disk datastore.
+
+The password is stored under `/etc/pve/priv/storage` with mode 0600, not in `storage.cfg`. The prototype defaults to disabled TLS certificate verification; enable **Check SSL** with a trusted SolidFire certificate outside a disposable lab. Removing the PVE storage entry removes its credential file but **does not delete the SolidFire volume**. If provisioning fails or times out, check the array for an existing volume before retrying.
+
+Run the focused tests on a PVE node with `FIREMOX_PLUGIN_PATH=/path/to/SolidFirePlugin.pm perl test-provision.t`.
+
+**NOTE:** it is recommended to use Firemox (PowerShell) or another way to create several QoS policies and assign those to volumes rather than customize settings for each volume.
 
 ## How to use
 
@@ -408,7 +424,3 @@ The only module required is the open source PwshSpectreConsole written by a repu
 As mentioned in Security, isolated Firemox could be desirable for some users, so there's a Dockerfile and two other files related to it to help you get started. 
 
 I don't know anyone would need that in a test or lab environment, so for now I'll just post these files as they are and if people use them I'll make sure they can work. Please do not assume they'll work without bug fixes - they haven't been tested.
-
-
-
-
