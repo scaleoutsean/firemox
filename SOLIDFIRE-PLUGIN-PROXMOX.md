@@ -1,4 +1,3 @@
-
 # Experimental PVE **LUN-only** provisioning wizard (SolidFire Perl Plugin for PVE)
 
 What does this plugin do, how it relates to Firemox TUI and what's the use case here?
@@ -55,6 +54,7 @@ Due to plugin's experimental status, there are known limitations which are likel
 
 - LUN growth, snapshots, automatic target login, and LVM creation are **not implemented** for this provisioning workflow. The LUN is not a until all steps that Firemox does, have been completed.
 - Post-creation edits such as QoS policy settings are not propagated to the array. Consequently, you can edit QoS settings the LUN on SolidFire and not worry about its setting in the plugin. 
+- LUN deleted from PVE remains on SolidFire as that hasn't been implemented either.
 
 You may use Firemox or perform such actions manually.
 
