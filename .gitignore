@@ -1,3 +1,6 @@
 *.2025*
 .vscode/
 old/
+.env
+env.txt
+reference

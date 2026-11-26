@@ -13,16 +13,16 @@ param(
 )
 
 
-# Firemox is used to configure SolidFire for use with Proxmox VE.
+# Firemox is used to configure SolidFire for use with Proxmox VE 9.
 # It sets up the SolidFire account, volumes, initiators, VAG and QoS policies.
 # It then uses the Proxmox VE API to create iSCSI pools and optionally VGs/LVMs on those pools.
 #
 # License: MIT
-# Copyright (c) 2025 scaleoutSean@Github https://github.com/scaleoutsean/firemox
+# Copyright (c) 2026 scaleoutSean@Github https://github.com/scaleoutsean/firemox
 #
 
 # SolidFire and Proxmox VE configuration parameters
-[Uri]$Global:sfApiUri = [Uri]'https://192.168.1.34/json-rpc/12.5/' # SolidFire API address as Uri type
+[Uri]$Global:sfApiUri = [Uri]'https://192.168.1.30/json-rpc/12.5/' # SolidFire API address as Uri type
 [string]$Global:sfAdmin = 'admin'       # SolidFire account name used for Proxmox VE datacenter configuration
 [string]$Global:sfPass = 'admin'
 [int]$Global:sfAccountId = 169        # SolidFire account ID (not name!!!) used for Proxmox VE datacenter configuration

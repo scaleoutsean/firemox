@@ -3,10 +3,10 @@
 
 - [Firemox - an opinionated Proxmox-SolidFire console in PowerShell](#firemox---an-opinionated-proxmox-solidfire-console-in-powershell)
   - [About Firemox](#about-firemox)
+  - [Firemox vs. SolidFire Plugin for PVE 9.3](#firemox-vs-solidfire-plugin-for-pve-93)
     - [Traget audience](#traget-audience)
   - [TL;DR](#tldr)
   - [Features](#features)
-  - [Experimental PVE LUN provisioning (Perl Plugin)](#experimental-pve-lun-provisioning-perl-plugin)
   - [How to use](#how-to-use)
     - [Configuration](#configuration)
     - [Storage on-boarding](#storage-on-boarding)
@@ -33,9 +33,9 @@
     - [Monitoring](#monitoring)
     - [Security](#security)
       - [SolidFire and PVE RBAC](#solidfire-and-pve-rbac)
-      - [Data privacy and protection](#data-privacy-and-protection)
       - [Dependencies](#dependencies)
     - [Containerization](#containerization)
+  - [Data privacy and protection](#data-privacy-and-protection)
 
 
 ## About Firemox
@@ -45,6 +45,11 @@ Firemox is an opinionated console for storage-related management tasks related t
 ![Firemox in 60s](./images/firemox-in-60s.gif)
 
 **Note:** development system credentials may be seen in debug output. That was spotted before posting the animation. Don't bother reporting this or junk credentials from the sample configuration files as "vulnerabilities".
+
+## Firemox vs. SolidFire Plugin for PVE 9.3
+
+- **Firemox** - PowerShell TUI for E2E SolidFire and PVE storage management. This README is for Firemox.
+- **SolidFire Plugin for PVE 9.3** - demo Perl plugin that **only** creates a volume on SolidFire. See [SOLIDFIRE-PLUGIN-PROXMOX])(./SOLIDFIRE-PLUGIN-PROXMOX.md) for the details and a walk-through.
 
 ### Traget audience
 
@@ -108,21 +113,6 @@ It's best to setup and play with a test PVE cluster until you're familiar with a
 - Remove empty VG/LVM/iSCSI storage from PVE (and optionally delete the SolidFire volume behind it)
 - Small quality-of-life stuff like an end-to-end storage map, iSCSI network configuration view, account storage efficiency, etc.
 
-## Experimental PVE LUN provisioning (Perl Plugin)
-
-The [SolidFire storage plugin prototype](./solidfire-proxmox/SolidFirePlugin.pm) can create one SolidFire LUN when adding a storage in the PVE 9.3 generated custom-plugin dialog. This is a lab-only provisioning experiment, not a working shared-LVM datastore or a replacement for Firemox.
-It declares storage API 17 on PVE 9.3 and caps the declared version to the API provided by older PVE releases; the provisioning workflow has been tested on PVE 9.3 only.
-
-Install the plugin on the PVE node and reload the PVE services. In Datacenter > Storage > Add > solidfire, enter the SolidFire API URL, administrator username and password, tenant account ID, and **Provision LUN Size (GiB)**. Set **Content** to **None**. The storage ID becomes the SolidFire volume name. QoS policy is optional (defaults to SolidFire defaults).
-
-The plugin only creates the array volume. Discover and log in to its iSCSI target separately, then configure a PVE iSCSI storage and shared LVM if needed. LUN growth, snapshots, automatic target login, and LVM creation are not implemented for this provisioning workflow. The storage entry is a placeholder, not a VM disk datastore.
-
-The password is stored under `/etc/pve/priv/storage` with mode 0600, not in `storage.cfg`. The prototype defaults to disabled TLS certificate verification; enable **Check SSL** with a trusted SolidFire certificate outside a disposable lab. Removing the PVE storage entry removes its credential file but **does not delete the SolidFire volume**. If provisioning fails or times out, check the array for an existing volume before retrying.
-
-Run the focused tests on a PVE node with `FIREMOX_PLUGIN_PATH=/path/to/SolidFirePlugin.pm perl test-provision.t`.
-
-**NOTE:** it is recommended to use Firemox (PowerShell) or another way to create several QoS policies and assign those to volumes rather than customize settings for each volume.
-
 ## How to use
 
 The main objective of Firemox is to offer consistency in the naming of SolidFire-related storage resources - that seemed the most annoying part of using PVE with SolidFire to me.
@@ -150,7 +140,7 @@ See the top of firemox.ps1:
 - PVE cluster admin with sufficient permissions for storage-related operations
 - SolidFire Storage Tenant Account ID (you can create it beforehand in SolidFire UI and hard-code the ID (integer) in the script to avoid having to enter it every time)
 
-It is possible to leave both SolidFire and PVE passwords empty and provide them at startup.
+It is possible **and suggested** to leave both SolidFire and PVE passwords empty and provide them at startup.
 
 ### Storage on-boarding
 
@@ -409,12 +399,6 @@ For SolidFire you have [SolidFire Exporter](https://github.com/mjavier2k/solidfi
 - SolidFire has limited ABAC/RBAC features, but it is possible to create a cluster admin account that is allowed access only to volumes, which is probably the most conservative setting possible (and may not be able to create VAGs or QoS, but you could use a full-featured cluster account to do that once)
 - PVE has richer, but also complicated, roles and it is possible to create an API user with the exact access you need
 
-#### Data privacy and protection
-
-Firemox does not collect or send any data whatsoever. 
-
-If you want, you can add only allowed routes on the VM where you use it (one to SolidFire MVIP, several to PVE node(s)).
-
 #### Dependencies
 
 The only module required is the open source PwshSpectreConsole written by a reputable PowerShell developer and community member.
@@ -424,3 +408,7 @@ The only module required is the open source PwshSpectreConsole written by a repu
 As mentioned in Security, isolated Firemox could be desirable for some users, so there's a Dockerfile and two other files related to it to help you get started. 
 
 I don't know anyone would need that in a test or lab environment, so for now I'll just post these files as they are and if people use them I'll make sure they can work. Please do not assume they'll work without bug fixes - they haven't been tested.
+
+## Data privacy and protection
+
+Neither Firemox nor SolidFire Plugin for PVE collect any data whatsoever. 
